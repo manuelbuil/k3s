@@ -15,6 +15,7 @@ import (
 	"github.com/k3s-io/k3s/pkg/agent/config"
 	"github.com/k3s-io/k3s/pkg/agent/containerd"
 	"github.com/k3s-io/k3s/pkg/agent/flannel"
+	"github.com/k3s-io/k3s/pkg/agent/multus"
 	"github.com/k3s-io/k3s/pkg/agent/netpol"
 	"github.com/k3s-io/k3s/pkg/agent/proxy"
 	"github.com/k3s-io/k3s/pkg/agent/syssetup"
@@ -128,6 +129,10 @@ func run(ctx context.Context, cfg cmds.Agent, proxy proxy.Proxy) error {
 		}
 		if err := flannel.Prepare(ctx, nodeConfig); err != nil {
 			return err
+		}
+
+		if nodeConfig.Multus {
+			go multus.StartMultusJob(ctx, nodeConfig)
 		}
 	}
 

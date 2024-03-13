@@ -38,6 +38,10 @@ It sucks a bit that the daemonset stays dormant forever after doing the job inst
 
 * K3s includes the multus and whereabouts CNI plugins as part of its multi-exec cni binary. However, the whereabouts binary is using very old dependencies which would creep in CVEs. Moreover, the size of the K3s binary would increase more than 10%, something not acceptable for a something that the vast majority of K3s users will not enable
 
+* Use a helm chart where we specify the datadir where it should deploy the extra plugin binaries (e.g. multus), we call that directory the CNI bin directory. The problem is that all nodes in the cluster do not necessarily share the same CNI bin directory and if we use /var/lib/rancher/data/$SHA/bin, that $SHA will change with each K3s build
+
+
+
 
 ### Limitations
 
