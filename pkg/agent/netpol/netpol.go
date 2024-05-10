@@ -105,6 +105,10 @@ func Run(ctx context.Context, nodeConfig *config.Node) error {
 	krConfig.RunRouter = false
 	krConfig.RunServiceProxy = false
 
+	if logrus.GetLevel() == logrus.DebugLevel {
+		krConfig.VLevel = "9"
+	}
+
 	stopCh := ctx.Done()
 	healthCh := make(chan *healthcheck.ControllerHeartbeat)
 
