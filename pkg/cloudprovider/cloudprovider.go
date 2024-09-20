@@ -92,7 +92,10 @@ func (k *k3s) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, st
 		coreFactory := core.NewFactoryFromConfigOrDie(config)
 		k.nodeCache = coreFactory.Core().V1().Node().Cache()
 
+		logrus.Infof("MANU - Initializing cloud provider. This is the LBNamespace: %v", k.LBNamespace)
+
 		lbCoreFactory := core.NewFactoryFromConfigWithOptionsOrDie(config, &generic.FactoryOptions{Namespace: k.LBNamespace})
+		lbCoreFactorySvc := core.NewFactoryFromConfigWithOptionsOrDie(config, &generic.FactoryOptions{})
 		lbAppsFactory := apps.NewFactoryFromConfigWithOptionsOrDie(config, &generic.FactoryOptions{Namespace: k.LBNamespace})
 		lbDiscFactory := discovery.NewFactoryFromConfigOrDie(config)
 
@@ -106,11 +109,11 @@ func (k *k3s) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, st
 		k.podCache = lbCoreFactory.Core().V1().Pod().Cache()
 		k.workqueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-		if err := k.Register(ctx, coreFactory.Core().V1().Node(), lbCoreFactory.Core().V1().Pod(), lbDiscFactory.Discovery().V1().EndpointSlice()); err != nil {
+		if err := k.Register(ctx, coreFactory.Core().V1().Node(), lbCoreFactory.Core().V1().Pod(), lbDiscFactory.Discovery().V1().EndpointSlice(), lbCoreFactorySvc.Core().V1().Service()); err != nil {
 			logrus.Panicf("failed to register %s handlers: %v", controllerName, err)
 		}
 
-		if err := start.All(ctx, 1, coreFactory, lbCoreFactory, lbAppsFactory, lbDiscFactory); err != nil {
+		if err := start.All(ctx, 1, coreFactory, lbCoreFactory, lbAppsFactory, lbCoreFactorySvc, lbDiscFactory); err != nil {
 			logrus.Panicf("failed to start %s controllers: %v", controllerName, err)
 		}
 	} else {

@@ -4,21 +4,23 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+//	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	cloudprovider "k8s.io/cloud-provider"
+
+	"github.com/sirupsen/logrus"
 )
 
 var _ cloudprovider.LoadBalancer = &k3s{}
 
 // GetLoadBalancer returns whether the specified load balancer exists, and if so, what its status is.
 func (k *k3s) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (*corev1.LoadBalancerStatus, bool, error) {
-	if _, err := k.getDaemonSet(service); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-
+//logrus.Infof("MANU - CloudProvider GetLoadBalancer called. This is service: %v", service)
+//	if _, err := k.getDaemonSet(service); err != nil {
+//if apierrors.IsNotFound(err) {
+//			return nil, false, nil
+//}
+//		return nil, false, err
+//	}
 	status, err := k.getStatus(service)
 	return status, true, err
 }
@@ -32,9 +34,11 @@ func (k *k3s) GetLoadBalancerName(ctx context.Context, clusterName string, servi
 // The node list is unused; see the comment on UpdateLoadBalancer for information on why.
 // This is called when the Service is created or changes.
 func (k *k3s) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
-	if err := k.deployDaemonSet(ctx, service); err != nil {
-		return nil, err
-	}
+	//logrus.Info("MANU - CloudProvider EnsureLoadBalancer called")
+//if err := k.deployDaemonSet(ctx, service); err != nil {
+//		return nil, err
+//	}
+	logrus.Info("MANU - EnsureLoadBalancer was called")
 	return nil, cloudprovider.ImplementedElsewhere
 }
 

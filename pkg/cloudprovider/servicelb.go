@@ -2,12 +2,12 @@ package cloudprovider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
-	"encoding/json"
+
 	"sigs.k8s.io/yaml"
 
 	"github.com/k3s-io/k3s/pkg/util"
@@ -16,7 +16,8 @@ import (
 	coreclient "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	discoveryclient "github.com/rancher/wrangler/v3/pkg/generated/controllers/discovery/v1"
 	"github.com/rancher/wrangler/v3/pkg/merr"
-	"github.com/rancher/wrangler/v3/pkg/objectset"
+
+	//	"github.com/rancher/wrangler/v3/pkg/objectset"
 	"github.com/sirupsen/logrus"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -55,17 +56,24 @@ const (
 )
 
 var (
-	DefaultLBImage = "rancher/klipper-lb:v0.4.9"
+	DefaultLBImage = "mbuilsuse/klipperlb:20240920-testing2"
 )
 
 func (k *k3s) Register(ctx context.Context,
 	nodes coreclient.NodeController,
 	pods coreclient.PodController,
 	endpointslices discoveryclient.EndpointSliceController,
+	services coreclient.ServiceController,
 ) error {
+	logrus.Info("MANU - Registering controllers")
+	if services == nil {
+		logrus.Info("MANU - Services is nil")
+	}
+	logrus.Infof("MANU - This is services: %v", services)
 	nodes.OnChange(ctx, controllerName, k.onChangeNode)
 	pods.OnChange(ctx, controllerName, k.onChangePod)
 	endpointslices.OnChange(ctx, controllerName, k.onChangeEndpointSlice)
+	services.OnChange(ctx, controllerName, k.onChangeService)
 
 	if err := k.ensureServiceLBNamespace(ctx); err != nil {
 		return err
@@ -119,6 +127,7 @@ func (k *k3s) ensureServiceLBServiceAccount(ctx context.Context) error {
 // If the pod has labels that tie it to a service, and the pod has an IP assigned,
 // enqueue an update to the service's status.
 func (k *k3s) onChangePod(key string, pod *core.Pod) (*core.Pod, error) {
+	logrus.Info("MANU - onChangePod called")
 	if pod == nil {
 		return nil, nil
 	}
@@ -144,6 +153,7 @@ func (k *k3s) onChangePod(key string, pod *core.Pod) (*core.Pod, error) {
 // onChangeNode handles changes to Nodes. We need to handle this as we may need to kick the DaemonSet
 // to add or remove pods from nodes if labels have changed.
 func (k *k3s) onChangeNode(key string, node *core.Node) (*core.Node, error) {
+	logrus.Info("MANU - onChangeNode called")
 	if node == nil {
 		return nil, nil
 	}
@@ -161,6 +171,7 @@ func (k *k3s) onChangeNode(key string, node *core.Node) (*core.Node, error) {
 // onChangeEndpointSlice handles changes to EndpointSlices. This is used to ensure that LoadBalancer
 // addresses only list Nodes with ready Pods, when their ExternalTrafficPolicy is set to Local.
 func (k *k3s) onChangeEndpointSlice(key string, eps *discovery.EndpointSlice) (*discovery.EndpointSlice, error) {
+	logrus.Infof("MANU - onChangeEndpointSlice called with key: %s, endpointSlice: %v", key, eps)
 	if eps == nil {
 		return nil, nil
 	}
@@ -174,12 +185,30 @@ func (k *k3s) onChangeEndpointSlice(key string, eps *discovery.EndpointSlice) (*
 	return eps, nil
 }
 
+// onChangeService handles changes to Services.
+// If the service is of type LoadBalancer, enqueue an update to the service's status.
+// Addresses services that we changed its type to LoadBalancer.
+func (k *k3s) onChangeService(key string, svc *core.Service) (*core.Service, error) {
+	logrus.Infof("MANU - onChangeService called with key: %s, service: %v", key, svc)
+	if svc == nil {
+		return nil, nil
+	}
+
+	if svc.Spec.Type != core.ServiceTypeLoadBalancer {
+		return svc, nil
+	}
+
+	k.workqueue.Add(svc.Namespace + "/" + svc.Name)
+	return svc, nil
+}
+
 // runWorker dequeues Service changes from the work queue
 // We run a lightweight work queue to handle service updates. We don't need the full overhead
 // of a wrangler service controller and shared informer cache, but we do want to run changes
 // through a keyed queue to reduce thrashing when pods are updated. Much of this is cribbed from
 // https://github.com/rancher/lasso/blob/release/v2.5/pkg/controller/controller.go#L173-L215
 func (k *k3s) runWorker() {
+	logrus.Info("MANU - runWorker called")
 	for k.processNextWorkItem() {
 	}
 }
@@ -230,6 +259,7 @@ func (k *k3s) processSingleItem(obj interface{}) error {
 // LoadBalancer service.  The patchStatus function handles checking to see if status needs updating.
 func (k *k3s) updateStatus(namespace, name string) error {
 	svc, err := k.client.CoreV1().Services(namespace).Get(context.TODO(), name, meta.GetOptions{})
+	logrus.Infof("MANU - In updateStatus. This is type: %v", svc.Spec.Type)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -280,15 +310,35 @@ func (k *k3s) getStatus(svc *core.Service) (*core.LoadBalancerStatus, error) {
 		}
 	}
 
-	pods, err := k.podCache.List(k.LBNamespace, labels.SelectorFromSet(labels.Set{
-		svcNameLabel:      svc.Name,
-		svcNamespaceLabel: svc.Namespace,
-	}))
+	nodes, err := k.nodeCache.List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
 
-	expectedIPs, err := k.podIPs(pods, svc, readyNodes)
+	nodeAddresses := []string{}
+
+	for _, node := range nodes {
+		for _, addresses := range node.Status.Addresses {
+			nodeAddresses = append(nodeAddresses, addresses.Address)
+		}
+	}
+
+	expectedIPs, err := filterByIPFamily(nodeAddresses, svc)
+	if err != nil {
+		return nil, err
+	}
+
+	//pods, err := k.podCache.List(k.LBNamespace, labels.SelectorFromSet(labels.Set{
+	//		svcNameLabel:      svc.Name,
+	//		svcNamespaceLabel: svc.Namespace,
+	//	}))
+	//	if err != nil {
+	//		return nil, err
+	//	}
+
+	//expectedIPs, err := k.podIPs(pods, svc, readyNodes)
+	//	logrus.Infof("MANU - In getStatus. These are the expectedIPs: %v", expectedIPs)
+	//	logrus.Infof("MANU - In getStatus. These are the addresses: %v", addresses)
 	if err != nil {
 		return nil, err
 	}
@@ -300,11 +350,14 @@ func (k *k3s) getStatus(svc *core.Service) (*core.LoadBalancerStatus, error) {
 		})
 	}
 
+	logrus.Infof("MANU - End of getStatus. This is the LoadBalancerStatus: %v", loadbalancer)
 	return loadbalancer, nil
 }
 
 // patchStatus patches the service status. If the status has not changed, this function is a no-op.
 func (k *k3s) patchStatus(svc *core.Service, previousStatus, newStatus *core.LoadBalancerStatus) error {
+	logrus.Info("MANU - CloudProvider patchStatus called")
+	logrus.Infof("MANU - This is the previousStatus: %v and this is the new status: %v", previousStatus, newStatus)
 	if servicehelper.LoadBalancerStatusEqual(previousStatus, newStatus) {
 		return nil
 	}
@@ -372,6 +425,7 @@ func (k *k3s) podIPs(pods []*core.Pod, svc *core.Service, readyNodes map[string]
 		return []string{"127.0.0.1"}, nil
 	}
 
+	logrus.Infof("MANU - podIPs will return the ips: %v", ips)
 	return ips, nil
 }
 
@@ -405,15 +459,17 @@ func filterByIPFamily(ips []string, svc *core.Service) ([]string, error) {
 }
 
 // deployDaemonSet ensures that there is a DaemonSet for the service.
-func (k *k3s) deployDaemonSet(ctx context.Context, svc *core.Service) error {
-	ds, err := k.newDaemonSet(svc)
-	if err != nil {
-		return err
-	}
+//func (k *k3s) deployDaemonSet(ctx context.Context, svc *core.Service) error {
+//	logrus.Info("MANU CloudProvider - deployDaemonSet")
+//	ds, err := k.newDaemonSet(svc)
+//	if err != nil {
+//		return err
+//	}
+//	logrus.Infof("MANU CloudProvider - This is the DaemonSet: %v"	, ds)
 
-	defer k.recorder.Eventf(svc, core.EventTypeNormal, "AppliedDaemonSet", "Applied LoadBalancer DaemonSet %s/%s", ds.Namespace, ds.Name)
-	return k.processor.WithContext(ctx).WithOwner(svc).Apply(objectset.NewObjectSet(ds))
-}
+//	defer k.recorder.Eventf(svc, core.EventTypeNormal, "AppliedDaemonSet", "Applied LoadBalancer DaemonSet %s/%s", ds.Namespace, ds.Name)
+//	return k.processor.WithContext(ctx).WithOwner(svc).Apply(objectset.NewObjectSet(ds))
+//}
 
 // deleteDaemonSet ensures that there are no DaemonSets for the given service.
 func (k *k3s) deleteDaemonSet(ctx context.Context, svc *core.Service) error {
@@ -434,7 +490,7 @@ func (k *k3s) newDaemonSet(svc *core.Service) (*apps.DaemonSet, error) {
 	name := generateName(svc)
 	oneInt := intstr.FromInt(1)
 	priorityClassName := k.getPriorityClassName(svc)
-	localTraffic := servicehelper.RequestsOnlyLocalTraffic(svc)
+	//localTraffic := servicehelper.RequestsOnlyLocalTraffic(svc)
 	sourceRangesSet, err := servicehelper.GetLoadBalancerSourceRanges(svc)
 	if err != nil {
 		return nil, err
@@ -516,73 +572,13 @@ func (k *k3s) newDaemonSet(svc *core.Service) (*apps.DaemonSet, error) {
 		},
 	}
 
-	for _, port := range svc.Spec.Ports {
-		portName := fmt.Sprintf("lb-%s-%d", strings.ToLower(string(port.Protocol)), port.Port)
-		container := core.Container{
-			Name:            portName,
-			Image:           k.LBImage,
-			ImagePullPolicy: core.PullIfNotPresent,
-			Ports: []core.ContainerPort{
-				{
-					Name:          portName,
-					ContainerPort: port.Port,
-					HostPort:      port.Port,
-					Protocol:      port.Protocol,
-				},
-			},
-			Env: []core.EnvVar{
-				{
-					Name:  "SRC_PORT",
-					Value: strconv.Itoa(int(port.Port)),
-				},
-				{
-					Name:  "SRC_RANGES",
-					Value: sourceRanges,
-				},
-				{
-					Name:  "DEST_PROTO",
-					Value: string(port.Protocol),
-				},
-			},
-			SecurityContext: &core.SecurityContext{
-				Capabilities: &core.Capabilities{
-					Add: []core.Capability{
-						"NET_ADMIN",
-					},
-				},
-			},
-		}
-
-		if localTraffic {
-			container.Env = append(container.Env,
-				core.EnvVar{
-					Name:  "DEST_PORT",
-					Value: strconv.Itoa(int(port.NodePort)),
-				},
-				core.EnvVar{
-					Name: "DEST_IPS",
-					ValueFrom: &core.EnvVarSource{
-						FieldRef: &core.ObjectFieldSelector{
-							FieldPath: getHostIPsFieldPath(),
-						},
-					},
-				},
-			)
-		} else {
-			container.Env = append(container.Env,
-				core.EnvVar{
-					Name:  "DEST_PORT",
-					Value: strconv.Itoa(int(port.Port)),
-				},
-				core.EnvVar{
-					Name:  "DEST_IPS",
-					Value: strings.Join(svc.Spec.ClusterIPs, ","),
-				},
-			)
-		}
-
-		ds.Spec.Template.Spec.Containers = append(ds.Spec.Template.Spec.Containers, container)
+	container := core.Container{
+		Name:            "testing",
+		Image:           k.LBImage,
+		ImagePullPolicy: core.PullIfNotPresent,
 	}
+
+	ds.Spec.Template.Spec.Containers = append(ds.Spec.Template.Spec.Containers, container)
 
 	// Add node selector only if label "svccontroller.k3s.cattle.io/enablelb" exists on the nodes
 	enableNodeSelector, err := k.nodeHasDaemonSetLabel()
@@ -710,8 +706,8 @@ func (k *k3s) getPriorityClassName(svc *core.Service) string {
 	return k.LBDefaultPriorityClassName
 }
 
-// getTolerations retrieves the tolerations from a service's annotations. 
-// It parses the tolerations from a JSON or YAML string stored in the annotations. 
+// getTolerations retrieves the tolerations from a service's annotations.
+// It parses the tolerations from a JSON or YAML string stored in the annotations.
 func (k *k3s) getTolerations(svc *core.Service) ([]core.Toleration, error) {
 	tolerationsStr, ok := svc.Annotations[tolerationsAnnotation]
 	if !ok {
