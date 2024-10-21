@@ -55,7 +55,7 @@ const (
 )
 
 var (
-	DefaultLBImage = "rancher/klipper-lb:v0.4.9"
+	DefaultLBImage = "mbuilsuse/klipper-lb:testing1-20241021"
 )
 
 func (k *k3s) Register(ctx context.Context,
@@ -241,6 +241,26 @@ func (k *k3s) updateStatus(namespace, name string) error {
 		return nil
 	}
 
+	eps, err := k.getEndpoints(svc)
+	if err != nil {
+		return err
+	}
+
+	if len(eps) > 0 {
+		// Modify the labels
+		if svc.Labels == nil {
+			svc.Labels = make(map[string]string)
+		}
+		logrus.Infof("MANU - This is the pod: %v", eps[0].Endpoints[0].Addresses[0])
+		logrus.Infof("MANU - This is the target port: %v", svc.Spec.Ports[0].TargetPort.String())
+		svc.Labels["servicePod"] = eps[0].Endpoints[0].Addresses[0]
+		svc.Labels["serviceTargetPort"] = svc.Spec.Ports[0].TargetPort.String()
+		_, err := k.client.CoreV1().Services(namespace).Update(context.TODO(), svc, meta.UpdateOptions{})
+		if err != nil {
+			return err
+		}
+	}
+
 	previousStatus := svc.Status.LoadBalancer.DeepCopy()
 	newStatus, err := k.getStatus(svc)
 	if err != nil {
@@ -253,6 +273,20 @@ func (k *k3s) updateStatus(namespace, name string) error {
 // getDaemonSet returns the DaemonSet that should exist for the Service.
 func (k *k3s) getDaemonSet(svc *core.Service) (*apps.DaemonSet, error) {
 	return k.daemonsetCache.Get(k.LBNamespace, generateName(svc))
+}
+
+// getEndpoints returns the EndpointSlice for the Service
+func (k *k3s) getEndpoints(svc *core.Service) ([]*discovery.EndpointSlice, error) {
+	if servicehelper.RequestsOnlyLocalTraffic(svc) {
+		eps, err := k.endpointsCache.List(svc.Namespace, labels.SelectorFromSet(labels.Set{
+			discovery.LabelServiceName: svc.Name,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		return eps, nil
+	}
+	return nil, nil
 }
 
 // getStatus returns a LoadBalancerStatus listing ingress IPs for all ready pods
@@ -435,6 +469,7 @@ func (k *k3s) newDaemonSet(svc *core.Service) (*apps.DaemonSet, error) {
 	oneInt := intstr.FromInt(1)
 	priorityClassName := k.getPriorityClassName(svc)
 	localTraffic := servicehelper.RequestsOnlyLocalTraffic(svc)
+	logrus.Infof("MANU - This is localTraffic: %v", localTraffic)
 	sourceRangesSet, err := servicehelper.GetLoadBalancerSourceRanges(svc)
 	if err != nil {
 		return nil, err
@@ -554,32 +589,46 @@ func (k *k3s) newDaemonSet(svc *core.Service) (*apps.DaemonSet, error) {
 		}
 
 		if localTraffic {
+			logrus.Infof("MANU - Localtraffic is true")
+			logrus.Infof("MANU - This is DEST_PORT: %v and this is DEST_IPS: %v", port.NodePort, getHostIPsFieldPath())
+			labelPodKey := "servicePod"
+			labelTargetPortKey := "serviceTargetPort"
+			labelPodValue := svc.Labels[labelPodKey]
+			labelTargetPortValue := svc.Labels[labelTargetPortKey]
 			container.Env = append(container.Env,
 				core.EnvVar{
-					Name:  "DEST_PORT",
-					Value: strconv.Itoa(int(port.NodePort)),
+					Name:  "MASQ",
+					Value: "false",
 				},
 				core.EnvVar{
-					Name: "DEST_IPS",
-					ValueFrom: &core.EnvVarSource{
-						FieldRef: &core.ObjectFieldSelector{
-							FieldPath: getHostIPsFieldPath(),
-						},
-					},
+					Name:  "PODIP",
+					Value: labelPodValue,
+				},
+				core.EnvVar{
+					Name:  "TARGET_PORT",
+					Value: labelTargetPortValue,
 				},
 			)
 		} else {
+			logrus.Infof("MANU - Localtraffic is false")
 			container.Env = append(container.Env,
 				core.EnvVar{
-					Name:  "DEST_PORT",
-					Value: strconv.Itoa(int(port.Port)),
-				},
-				core.EnvVar{
-					Name:  "DEST_IPS",
-					Value: strings.Join(svc.Spec.ClusterIPs, ","),
+					Name:  "MASQ",
+					Value: "true",
 				},
 			)
 		}
+
+		container.Env = append(container.Env,
+			core.EnvVar{
+				Name:  "DEST_PORT",
+				Value: strconv.Itoa(int(port.Port)),
+			},
+			core.EnvVar{
+				Name:  "DEST_IPS",
+				Value: strings.Join(svc.Spec.ClusterIPs, ","),
+			},
+		)
 
 		ds.Spec.Template.Spec.Containers = append(ds.Spec.Template.Spec.Containers, container)
 	}
