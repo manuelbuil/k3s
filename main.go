@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/k3s-io/k3s/pkg/cli/agent"
+	"github.com/k3s-io/k3s/pkg/cli/agentloadbalancer"
 	"github.com/k3s-io/k3s/pkg/cli/cert"
 	"github.com/k3s-io/k3s/pkg/cli/cmds"
 	"github.com/k3s-io/k3s/pkg/cli/completion"
@@ -27,6 +28,9 @@ func main() {
 		cmds.NewAgentCommand(agent.Run),
 		cmds.NewKubectlCommand(kubectl.Run),
 		cmds.NewCRICTL(crictl.Run),
+		cmds.NewAgentLoadBalancerCommands(
+			agentloadbalancer.Status,
+		),
 		cmds.NewEtcdSnapshotCommands(
 			etcdsnapshot.Delete,
 			etcdsnapshot.List,

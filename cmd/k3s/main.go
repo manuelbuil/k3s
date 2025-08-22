@@ -48,6 +48,7 @@ func main() {
 	etcdsnapshotCommand := internalCLIAction(version.Program+"-"+cmds.EtcdSnapshotCommand, dataDir, os.Args)
 	secretsencryptCommand := internalCLIAction(version.Program+"-"+cmds.SecretsEncryptCommand, dataDir, os.Args)
 	certCommand := internalCLIAction(version.Program+"-"+cmds.CertCommand, dataDir, os.Args)
+	agentloadbalancerCommand := internalCLIAction(version.Program+"-"+cmds.AgentLoadBalancerCommand, dataDir, os.Args)
 
 	// Handle subcommand invocation (k3s server, k3s crictl, etc)
 	app := cmds.NewApp()
@@ -66,6 +67,9 @@ func main() {
 			tokenCommand,
 			tokenCommand,
 			tokenCommand,
+		),
+		cmds.NewAgentLoadBalancerCommands(
+			agentloadbalancerCommand,
 		),
 		cmds.NewEtcdSnapshotCommands(
 			etcdsnapshotCommand,
