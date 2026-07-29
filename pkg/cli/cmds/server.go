@@ -87,6 +87,7 @@ type Server struct {
 	EncryptSkip              bool
 	EncryptProvider          string
 	SystemDefaultRegistry    string
+	CriticalExtraConfig      string
 	StartupHooks             []StartupHook
 	SupervisorMetrics        bool
 	EtcdSnapshotName         string
@@ -597,6 +598,14 @@ var ServerFlags = []cli.Flag{
 		Usage:       "(agent/runtime) Private registry to be used for all system images",
 		EnvVars:     []string{version.ProgramUpper + "_SYSTEM_DEFAULT_REGISTRY"},
 		Destination: &ServerConfig.SystemDefaultRegistry,
+	},
+	&cli.StringFlag{
+		Name: "critical-extra-config",
+		// Opaque, distribution-agnostic critical config. Set programmatically by
+		// distributions layered on top of k3s (e.g. RKE2) to have their own critical
+		// settings validated at join time; not intended to be set by end users.
+		Hidden:      true,
+		Destination: &ServerConfig.CriticalExtraConfig,
 	},
 	AirgapExtraRegistryFlag,
 	NodeIPFlag,

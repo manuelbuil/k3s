@@ -534,18 +534,33 @@ func (c *Cluster) compareConfig() error {
 	ipsTo16Bytes(c.config.CriticalControlArgs.ClusterIPRanges)
 	ipsTo16Bytes(c.config.CriticalControlArgs.ServiceIPRanges)
 
+	return compareCriticalControlArgs(c.config.CriticalControlArgs, clusterControl.CriticalControlArgs)
+}
+
+// compareCriticalControlArgs compares the critical control args of the local
+// (joining) server against those served by the existing cluster. It applies
+// down-level tolerance for fields that an older server may not populate, so that
+// a temporary mismatch during upgrades does not block the join, then fails if a
+// genuine mismatch remains, logging the offending CLI flag for each diff.
+func compareCriticalControlArgs(local, cluster config.CriticalControlArgs) error {
 	// If the remote server is down-level and did not fill the egress-selector
 	// mode, use the local value to allow for temporary mismatch during upgrades.
-	if clusterControl.CriticalControlArgs.EgressSelectorMode == "" {
-		clusterControl.CriticalControlArgs.EgressSelectorMode = c.config.CriticalControlArgs.EgressSelectorMode
+	if cluster.EgressSelectorMode == "" {
+		cluster.EgressSelectorMode = local.EgressSelectorMode
 	}
 	// If the remote server is down-level, for secrets-encryption-key-type
-	if clusterControl.CriticalControlArgs.EncryptProvider == "" {
-		clusterControl.CriticalControlArgs.EncryptProvider = c.config.CriticalControlArgs.EncryptProvider
+	if cluster.EncryptProvider == "" {
+		cluster.EncryptProvider = local.EncryptProvider
+	}
+	// If the remote server is down-level and did not fill the opaque extra
+	// critical config (e.g. an older distribution build), use the local value to
+	// allow for temporary mismatch during upgrades.
+	if cluster.CriticalExtraConfig == "" {
+		cluster.CriticalExtraConfig = local.CriticalExtraConfig
 	}
 
-	if diff := deep.Equal(c.config.CriticalControlArgs, clusterControl.CriticalControlArgs); diff != nil {
-		rc := reflect.ValueOf(clusterControl.CriticalControlArgs).Type()
+	if diff := deep.Equal(local, cluster); diff != nil {
+		rc := reflect.ValueOf(cluster).Type()
 		for _, d := range diff {
 			field := strings.Split(d, ":")[0]
 			v, _ := rc.FieldByName(field)

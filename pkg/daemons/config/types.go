@@ -169,25 +169,33 @@ type Agent struct {
 // CriticalControlArgs contains parameters that all control plane nodes in HA must share
 // The cli tag is used to provide better error information to the user on mismatch
 type CriticalControlArgs struct {
-	ClusterDNSs           []net.IP     `cli:"cluster-dns"`
-	ClusterIPRanges       []*net.IPNet `cli:"cluster-cidr"`
-	ClusterDNS            net.IP       `cli:"cluster-dns"`
-	ClusterDomain         string       `cli:"cluster-domain"`
-	ClusterIPRange        *net.IPNet   `cli:"cluster-cidr"`
-	DisableCCM            bool         `cli:"disable-cloud-controller"`
-	DisableHelmController bool         `cli:"disable-helm-controller"`
-	DisableNPC            bool         `cli:"disable-network-policy"`
-	DisableServiceLB      bool         `cli:"disable-service-lb"`
-	EncryptSecrets        bool         `cli:"secrets-encryption"`
-	EncryptProvider       string       `cli:"secrets-encryption-provider"`
-	EmbeddedRegistry      bool         `cli:"embedded-registry"`
-	FlannelBackend        string       `cli:"flannel-backend"`
-	FlannelIPv6Masq       bool         `cli:"flannel-ipv6-masq"`
-	FlannelExternalIP     bool         `cli:"flannel-external-ip"`
-	EgressSelectorMode    string       `cli:"egress-selector-mode"`
-	ServiceIPRange        *net.IPNet   `cli:"service-cidr"`
-	ServiceIPRanges       []*net.IPNet `cli:"service-cidr"`
-	SupervisorMetrics     bool         `cli:"supervisor-metrics"`
+	ClusterDNSs           []net.IP           `cli:"cluster-dns"`
+	ClusterIPRanges       []*net.IPNet       `cli:"cluster-cidr"`
+	ClusterDNS            net.IP             `cli:"cluster-dns"`
+	ClusterDomain         string             `cli:"cluster-domain"`
+	ClusterIPRange        *net.IPNet         `cli:"cluster-cidr"`
+	DisableCCM            bool               `cli:"disable-cloud-controller"`
+	DisableHelmController bool               `cli:"disable-helm-controller"`
+	DisableNPC            bool               `cli:"disable-network-policy"`
+	DisableServiceLB      bool               `cli:"disable-service-lb"`
+	EncryptSecrets        bool               `cli:"secrets-encryption"`
+	EncryptProvider       string             `cli:"secrets-encryption-provider"`
+	EmbeddedRegistry      bool               `cli:"embedded-registry"`
+	FlannelBackend        string             `cli:"flannel-backend"`
+	FlannelIPv6Masq       bool               `cli:"flannel-ipv6-masq"`
+	FlannelExternalIP     bool               `cli:"flannel-external-ip"`
+	EgressSelectorMode    string             `cli:"egress-selector-mode"`
+	ServiceIPRange        *net.IPNet         `cli:"service-cidr"`
+	ServiceIPRanges       []*net.IPNet       `cli:"service-cidr"`
+	SupervisorMetrics     bool               `cli:"supervisor-metrics"`
+	DisableKubeProxy      bool               `cli:"disable-kube-proxy"`
+	ServiceNodePortRange  *utilnet.PortRange `cli:"service-node-port-range"`
+	ServiceLBNamespace    string             `cli:"servicelb-namespace"`
+	SystemDefaultRegistry string             `cli:"system-default-registry"`
+	// CriticalExtraConfig is an opaque, distribution-agnostic field into which a
+	// distribution (e.g. RKE2) can serialize its own critical settings. K3s treats
+	// it as an opaque string and compares it verbatim during join.
+	CriticalExtraConfig string `cli:"critical-extra-config"`
 }
 
 type Control struct {
@@ -203,7 +211,6 @@ type Control struct {
 	APIServerBindAddress     string
 	AgentToken               string `json:"-"`
 	Token                    string `json:"-"`
-	ServiceNodePortRange     *utilnet.PortRange
 	KubeConfigOutput         string
 	KubeConfigMode           string
 	KubeConfigGroup          string
@@ -216,11 +223,9 @@ type Control struct {
 	DisableAPIServer         bool
 	DisableControllerManager bool
 	DisableETCD              bool
-	DisableKubeProxy         bool
 	DisableScheduler         bool
 	DisableServiceLB         bool
 	Rootless                 bool
-	ServiceLBNamespace       string
 	ExtraAPIArgs             []string
 	ExtraControllerArgs      []string
 	ExtraCloudControllerArgs []string
@@ -232,7 +237,6 @@ type Control struct {
 	IPSECPSK                 string
 	DefaultLocalStoragePath  string
 	Skips                    map[string]bool
-	SystemDefaultRegistry    string
 	ClusterInit              bool
 	ClusterReset             bool
 	ClusterResetRestorePath  string
